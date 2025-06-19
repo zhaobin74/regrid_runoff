@@ -2,7 +2,7 @@
 
 import argparse
 import netCDF4
-from numba import jit
+#from numba import jit
 import numpy
 import os
 import pickle
@@ -191,7 +191,9 @@ def main(args):
       print('%i/%i river cells without associated ocean id (first pass).'%((rvr_oid<0).sum(),rvr_oid.size))
    
     if args.progress: tic = info('Filling in remaining river cells by brute force (should take ~%.1fs)'%(120*ocn_mask.size/(1080*1440)))
-    for rid in rvr_id[ (rvr_oid.flatten()<0) ]:
+    tot = len(rvr_id[ (rvr_oid.flatten()<0) ])
+    for i, rid in enumerate(rvr_id[ (rvr_oid.flatten()<0) ]):
+      # print(i, tot)
       rj, ri = int(rid/rvr_ni), rid%rvr_ni
       oid = brute_force_search_for_ocn_ij( ocn_lat, ocn_lon, rvr_lat[rj], rvr_lon[ri])
       rvr_oid[rj, ri] = oid
@@ -280,7 +282,7 @@ def nearest_coastal_cell( ocn_id, cst_mask ):
   return cst_nrst_ocn_id
 
 class kdtree:
-  @jit
+  # @jit
   def __init__(self, lat, lon, level=0, i0=None, i1=None, j0=None, j1=None):
     """Contructs a k-d tree for a mesh with nodes at (lon,lat)."""
     self.level = level
@@ -313,13 +315,13 @@ class kdtree:
         self.leaves.append(di)
       self.xmin, self.xmax = xmin, xmax
       self.ymin, self.ymax = ymin, ymax
-  @jit
+  # @jit
   def first_divisor(n):
     """Returns the smallest, non-unity divisor of n."""
     for d in range(2,n//2+1):
       if n%d==0: return d
     return n
-  @jit
+  # @jit
   def sign_of_loc_p_on_ab(a_lon, a_lat, b_lon, b_lat, p_lon, p_lat):
     """Returns positive real if P to the right of AB, negative if to the left, and zero if P is on AB
     or AB has zero length."""
@@ -329,7 +331,7 @@ class kdtree:
     return False
   def id2s(self):
     return ' '*self.level + '%i:%i-%i,%i-%i'%(self.level,self.j0,self.j1,self.i0,self.i1)
-  #@jit
+  # @jit
   def find_cell(self, lat, lon):
     # First bounding box to reject (to minimize cost)
     if lat<self.ymin:
@@ -409,26 +411,27 @@ def regrid_runoff( old_file, var_name, A, new_file_name, ocn_area, ocn_mask, ocn
 
   # More info
   new_file.setncattr('regrid_note', 'Regridded with regrid_runoff.py')
+  new_file.setncattr('grid_type', 'Tripolar')
 
   # Axes
   ocn_nj, ocn_ni = ocn_area.shape
-  new_file.createDimension('i',ocn_ni)
-  new_file.createDimension('j',ocn_nj)
-  new_file.createDimension('IQ',ocn_ni+1)
-  new_file.createDimension('JQ',ocn_nj+1)
+  new_file.createDimension('Xdim',ocn_ni)
+  new_file.createDimension('Ydim',ocn_nj)
+  new_file.createDimension('XCdim',ocn_ni+1)
+  new_file.createDimension('YCdim',ocn_nj+1)
   if time is not None:
     new_file.createDimension('time',None)
 
   # 1d variables
-  i = new_file.createVariable('i', 'f4', ('i',))
+  i = new_file.createVariable('Xdim', 'f4', ('Xdim',))
   i.long_name = 'Grid position along first dimension'
   if fms_attr: i.cartesian_axis = 'X'
-  j = new_file.createVariable('j', 'f4', ('j',))
+  j = new_file.createVariable('Ydim', 'f4', ('Ydim',))
   j.long_name = 'Grid position along second dimension'
   if fms_attr: j.cartesian_axis = 'Y'
-  I = new_file.createVariable('IQ', 'f4', ('IQ',))
+  I = new_file.createVariable('XCdim', 'f4', ('XCdim',))
   I.long_name = 'Grid position along first dimension'
-  J = new_file.createVariable('JQ', 'f4', ('JQ',))
+  J = new_file.createVariable('YCdim', 'f4', ('YCdim',))
   J.long_name = 'Grid position along second dimension'
   if time is not None:
     if '_FillValue' in old_file.variables[time].ncattrs():
@@ -438,7 +441,7 @@ def regrid_runoff( old_file, var_name, A, new_file_name, ocn_area, ocn_mask, ocn
     for a in old_file.variables[time].ncattrs():
       if a != '_FillValue':
         t.setncattr(a, old_file.variables[time].getncattr(a))
-    t.long_name = 'Time'
+    t.long_name = 'time'
     if fms_attr:
       t.cartesian_axis = 'T'
     if fmst_attr:
@@ -448,32 +451,32 @@ def regrid_runoff( old_file, var_name, A, new_file_name, ocn_area, ocn_mask, ocn
         t.modulo_end = '%4.4i-01-01 00:00:00'%(1948+num_records/12)
 
   # 2d variables
-  lon = new_file.createVariable('lon', 'f4', ('j','i',))
+  lon = new_file.createVariable('lons', 'f4', ('Ydim','Xdim',))
   lon.long_name = 'Longitude of cell centers'
   lon.standard_name = 'longitude'
   lon.units = 'degrees_east'
-  lat = new_file.createVariable('lat', 'f4', ('j','i',))
+  lat = new_file.createVariable('lats', 'f4', ('Ydim','Xdim',))
   lat.long_name = 'Latitude of cell centers'
   lat.standard_name = 'latitude'
   lat.units = 'degrees_north'
-  lonq = new_file.createVariable('lon_crnr', 'f4', ('JQ','IQ',))
+  lonq = new_file.createVariable('corner_lons', 'f4', ('YCdim','XCdim',))
   lonq.long_name = 'Longitude of mesh nodes'
   lonq.standard_name = 'longitude'
   lonq.units = 'degrees_east'
-  latq = new_file.createVariable('lat_crnr', 'f4', ('JQ','IQ',))
+  latq = new_file.createVariable('corner_lats', 'f4', ('YCdim','XCdim',))
   latq.long_name = 'Latitude of mesh nodes'
   latq.standard_name = 'latitude'
   latq.units = 'degrees_north'
-  area = new_file.createVariable('area', area_dtype, ('j','i',))
+  area = new_file.createVariable('area', area_dtype, ('Ydim','Xdim',))
   area.long_name = 'Cell area'
   area.standard_name = 'cell_area'
   area.units = 'm2'
   area.coordinates = 'lon lat'
   area.mesh_coordinates = 'lon_crnr lat_crnr'
   if time is not None:
-    dims = ('time', 'j','i',)
+    dims = ('time', 'Ydim','Xdim',)
   else:
-    dims = ('j','i',)
+    dims = ('Ydim','Xdim',)
   if '_FillValue' in old_file.variables[var_name].ncattrs():
     new_runoff = new_file.createVariable(var_name, 'f4', dims, fill_value = old_file.variables[var_name]._FillValue, zlib=zlib, complevel=complevel)
     if fms_attr: new_runoff.missing_value = old_file.variables[var_name]._FillValue
